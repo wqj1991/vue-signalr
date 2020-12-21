@@ -11,7 +11,7 @@
 - 在 main.js 下
 
   ```javascript
-  import VueSignalR from './utils/signalR'
+  import VueSignalR from '@latelierco/vue-signal'
   Vue.use(VueSignalR, process.env.VUE_APP_BASE_API + 'hub/message')
   ```
 
