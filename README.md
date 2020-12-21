@@ -182,7 +182,7 @@
 $ npm install @wynnyo/vue-signalr --save
 ```
 
-## Get started
+## 使用
 
 
 ```js
