@@ -1,157 +1,160 @@
-import * as SignalR from '@microsoft/signalr';
+import * as SignalR from '@microsoft/signalr'
 
-const EventEmitter = require('events');
+const EventEmitter = require('events')
 
 const defaultOptions = {
-  log: false,
-};
+	log: false,
+}
 
 class SocketConnection extends EventEmitter {
-  constructor(connection) {
-    super();
+	constructor(connection, options = {}) {
+		super()
 
-    this.connection = connection;
-    this.listened = [];
-    this.socket = false;
+		this.connection = connection
+		this.options = Object.assign(defaultOptions, options)
+		this.listened = []
 
-    this.toSend = [];
+		this.toSend = []
 
-    this.offline = false;
-  }
+		this.offline = false
 
-  async _initialize(connection = '') {
-    const con = connection || this.connection;
+		this.socket = undefined
+	}
 
-    try {
-      const socket = new SignalR.HubConnectionBuilder()
-        .withUrl(con)
-        .withAutomaticReconnect()
-        .build()
-        
-      socket.connection.onclose = async (error) => {
-        if (this.options.log) console.log('Reconnecting...');
+	/**
+	 * 同一种消息只定义一次
+	 *
+	 * @param {string| symbol} event
+	 * @param {(...args: any[]) => void} listener
+	 * @memberof SocketConnection
+	 */
+	one(event, listener) {
+		if (this.listeners(event).length === 0) {
+			this.on(event, listener)
+		}
+	}
 
-        this.socket = false;
-        /* eslint-disable no-underscore-dangle */
-        await this._initialize(con);
-        this.emit('reconnect');
-      };
+	async _initialize() {
+		try {
+			await this.socket.start()
+			this.emit('onstart')
+			if (this.offline) {
+				this.emit('onrestart')
+			}
+			this.offline = false
+		} catch (error) {
+			setTimeout(async () => {
+				await this._initialize()
+			}, 5000)
+		}
+	}
 
-      await socket.start();
+	async start(options = {}) {
+		this.options = Object.assign(defaultOptions, options)
 
-      this.socket = socket;
-      this.emit('init');
-    } catch (error) {
-      if (this.options.log) console.log('Error, reconnecting...');
+		// 组件重新加载时, 如果 socket 存在, 不需要新建
+		if (!this.socket) {
+			this.socket = new SignalR.HubConnectionBuilder().configureLogging(SignalR.LogLevel.Information).withUrl(this.connection, this.options).build()
 
-      setTimeout(() => {
-        this._initialize(con);
-      }, 1000);
-    }
-  }
+			this.socket.onclose(async () => {
+				this.offline = true
+				this.emit('onclose')
+				await this._initialize()
+			})
 
-  async start(options = {}) {
-    this.options = Object.assign(defaultOptions, options);
+			await this._initialize()
+		}
+	}
 
-    await this._initialize();
-  }
+	async authenticate(accessToken, options = {}) {
+		this.connection = `${this.connection}?authorization=${accessToken}`
 
-  async authenticate(accessToken, options = {}) {
-    this.connection = `${this.connection}?authorization=${accessToken}`;
+		/* eslint-disable no-underscore-dangle */
+		await this.start()
+	}
 
-    /* eslint-disable no-underscore-dangle */
-    await this.start(options);
-  }
+	listen(method) {
+		if (this.offline) return
 
-  listen(method) {
-    if (this.offline) return;
+		if (this.listened.some((v) => v === method)) return
+		this.listened.push(method)
 
-    if (this.listened.some(v => v === method)) return;
-    this.listened.push(method);
+		this.one('onstart', () => {
+			this.socket.on(method, (data) => {
+				if (this.options.log) console.log({ type: 'receive', method, data })
 
-    this.on('init', () => {
-      this.socsket.on(method, (data) => {
-        if (this.options.log) console.log({ type: 'receive', method, data });
+				this.emit(method, data)
+			})
+		})
+	}
 
-        this.emit(method, data);
-      });
-    });
-  }
+	send(methodName, ...args) {
+		if (this.options.log) console.log({ type: 'send', methodName, args })
+		if (this.offline) return
 
-  send(methodName, ...args) {
-    if (this.options.log) console.log({ type: 'send', methodName, args });
-    if (this.offline) return;
+		if (this.socket) {
+			this.socket.send(methodName, ...args)
+			return
+		}
 
-    if (this.socket) {
-      this.socket.send(methodName, ...args);
-      return;
-    }
+		this.one('onstart', () => this.socket.send(methodName, ...args))
+	}
 
-    this.once('init', () => this.socket.send(methodName, ...args));
-  }
+	async invoke(methodName, ...args) {
+		if (this.options.log) console.log({ type: 'invoke', methodName, args })
+		if (this.offline) return false
 
-  async invoke(methodName, ...args) {
-    if (this.options.log) console.log({ type: 'invoke', methodName, args });
-    if (this.offline) return false;
+		if (this.socket) {
+			return this.socket.invoke(methodName, ...args)
+		}
 
-    if (this.socket) {
-      return this.socket.invoke(methodName, ...args);
-    }
-
-    return new Promise(async resolve =>
-      this.once('init', () =>
-        resolve(this.socket.invoke(methodName, ...args))));
-  }
-
+		// eslint-disable-next-line no-async-promise-executor
+		return new Promise(async (resolve) => this.one('onstart', () => resolve(this.socket.invoke(methodName, ...args))))
+	}
 }
 
 if (!SignalR) {
-  throw new Error('[Vue-SignalR] Cannot locate signalr-client');
+	throw new Error('[Vue-SignalR] Cannot locate signalr-client')
 }
 
 function install(Vue, connection) {
-  if (!connection) {
-    throw new Error('[Vue-SignalR] Cannot locate connection');
-  }
+	if (!connection) {
+		throw new Error('[Vue-SignalR] Cannot locate connection')
+	}
 
-  const Socket = new SocketConnection(connection);
+	const Socket = new SocketConnection(connection)
 
-  Vue.socket = Socket;
+	Vue.socket = Socket
 
-  Object.defineProperties(Vue.prototype, {
+	Object.defineProperties(Vue.prototype, {
+		$socket: {
+			get() {
+				return Socket
+			},
+		},
+	})
 
-    $socket: {
-      get() {
-        return Socket;
-      },
-    },
+	Vue.mixin({
+		created() {
+			if (this.$options.sockets) {
+				const methods = Object.getOwnPropertyNames(this.$options.sockets)
 
-  });
+				methods.forEach((method) => {
+					Socket.listen(method)
 
-  Vue.mixin({
+					Socket.one(method, (data) => this.$options.sockets[method].call(this, data))
+				})
+			}
 
-    created() {
-      if (this.$options.sockets) {
-        const methods = Object.getOwnPropertyNames(this.$options.sockets);
-
-        methods.forEach((method) => {
-          Socket.listen(method);
-
-          Socket.on(method, data =>
-            this.$options.sockets[method].call(this, data));
-        });
-      }
-
-      if (this.$options.subscribe) {
-        Socket.on('authenticated', () => {
-          this.$options.subscribe.forEach((channel) => {
-            Socket.invoke('join', channel);
-          });
-        });
-      }
-    },
-
-  });
+			if (this.$options.subscribe) {
+				Socket.one('authenticated', () => {
+					this.$options.subscribe.forEach((channel) => {
+						Socket.invoke('join', channel)
+					})
+				})
+			}
+		},
+	})
 }
 
-export default install;
+export default install
