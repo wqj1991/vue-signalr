@@ -14,7 +14,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/w21976169/vue-signalr.git"
+    "url": "git+https://github.com/wynnyo/vue-signalr.git"
   },
   "keywords": [
     "vue",
@@ -24,9 +24,9 @@
   "author": "wynnyo <w21976169@163.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/w21976169/vue-signalr/issues"
+    "url": "https://github.com/wynnyo/vue-signalr/issues"
   },
-  "homepage": "https://github.com/w21976169/vue-signalr#readme",
+  "homepage": "https://github.com/wynnyo/vue-signalr#readme",
   "dependencies": {
     "@microsoft/signalr": "^5.0.0",
     "tslib": "^2.0.0"
